@@ -17,10 +17,13 @@ import (
 var assets embed.FS
 
 func main() {
-	// Check if running as service
-	if len(os.Args) > 1 && os.Args[1] == "service" {
-		service.Run()
-		return
+	// If invoked with service commands, run as the background task runner.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "run", "install", "uninstall", "start", "stop", "status":
+			service.Run()
+			return
+		}
 	}
 
 	// Create an instance of the app structure

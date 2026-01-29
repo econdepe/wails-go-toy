@@ -14,6 +14,10 @@ export function InstallService() {
   return window['go']['app']['App']['InstallService']();
 }
 
+export function InstallSystemService() {
+  return window['go']['app']['App']['InstallSystemService']();
+}
+
 export function ReadLog() {
   return window['go']['app']['App']['ReadLog']();
 }

@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { GetServiceStatus, InstallService, UninstallService, StartService, StopService, ReadLog } from '../wailsjs/go/app/App';
+  import { GetServiceStatus, InstallService, InstallSystemService, UninstallService, StartService, StopService, ReadLog } from '../wailsjs/go/app/App';
 
   let status = 'Loading...';
   let message = '';
@@ -26,6 +26,13 @@
   async function handleInstall() {
     loading = true;
     message = await InstallService();
+    await refreshStatus();
+    loading = false;
+  }
+
+  async function handleInstallSystem() {
+    loading = true;
+    message = await InstallSystemService();
     await refreshStatus();
     loading = false;
   }
@@ -78,7 +85,8 @@
     </div>
 
     <div class="controls">
-      <button on:click={handleInstall} disabled={loading}>Install Service</button>
+      <button on:click={handleInstall} disabled={loading}>Install (user)</button>
+      <button on:click={handleInstallSystem} disabled={loading}>Install (system)</button>
       <button on:click={handleStart} disabled={loading}>Start Service</button>
       <button on:click={handleStop} disabled={loading}>Stop Service</button>
       <button on:click={handleUninstall} disabled={loading}>Uninstall Service</button>

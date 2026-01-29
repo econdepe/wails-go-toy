@@ -7,6 +7,8 @@ export function GetServiceStatus():Promise<string>;
 
 export function InstallService():Promise<string>;
 
+export function InstallSystemService():Promise<string>;
+
 export function ReadLog():Promise<string>;
 
 export function StartService():Promise<string>;

@@ -35,13 +35,29 @@ func (a *App) GetServiceStatus() string {
 	return status
 }
 
-// InstallService installs the service
+// InstallService installs the service with user privileges.
 func (a *App) InstallService() string {
 	err := a.svc.Install()
 	if err != nil {
 		return "Failed to install: " + err.Error()
 	}
 	return "Service installed successfully"
+}
+
+// InstallSystemService installs the service system-wide (Linux: /etc/systemd/system).
+// This typically requires admin privileges.
+func (a *App) InstallSystemService() string {
+	type systemInstaller interface {
+		InstallSystem() error
+	}
+	si, ok := a.svc.(systemInstaller)
+	if !ok {
+		return "System install not supported on this OS"
+	}
+	if err := si.InstallSystem(); err != nil {
+		return "Failed to install system service: " + err.Error()
+	}
+	return "System service installed successfully"
 }
 
 // UninstallService uninstalls the service

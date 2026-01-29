@@ -49,6 +49,8 @@ to this in your browser, and you can call your Go code from devtools.
 
 If you are using a Linux distribution that does not have webkit2gtk-4.0 (such as Ubuntu 24.04), you will need to run `wails dev -tags webkit2_41`.
 
+The app can install the background task as a **systemd user service** (no sudo, runs while you’re logged in). There’s also an optional **system-wide** install path, which requires admin privileges.
+
 ## Building
 
 To build a redistributable, production mode package, use `wails build`.
