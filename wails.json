@@ -1,0 +1,16 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "go-toy",
+  "outputfilename": "go-toy",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "edu",
+    "email": "edu@anaxa.ch"
+  },
+  "linux": {
+    "webview2": "webkit2gtk-4.1"
+  }
+}
