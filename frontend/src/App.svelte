@@ -1,63 +1,80 @@
 <script>
   import { onMount } from 'svelte';
   import { GetServiceStatus, InstallService, InstallSystemService, UninstallService, StartService, StopService, ReadLog } from '../wailsjs/go/app/App';
+  import { buildLogForDisplay } from './helpers/log';
 
   let status = 'Loading...';
   let message = '';
   let log = '';
   let loading = false;
+  let logElement;
+  let displayLog = '';
 
-  async function refreshStatus() {
+  $: displayLog = buildLogForDisplay(log);
+
+  const refreshStatus = async () => {
     try {
       status = await GetServiceStatus();
     } catch (e) {
       status = 'Error: ' + e;
     }
-  }
+  };
 
-  async function refreshLog() {
+  const scrollLogToTop = () => {
+    logElement?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const scrollLogToBottom = () => {
+    if (!logElement) return;
+    logElement.scrollTo({ top: logElement.scrollHeight, behavior: 'smooth' });
+  };
+
+  const refreshLog = async () => {
     try {
+      loading = true;
       log = await ReadLog();
     } catch (e) {
       log = 'Error reading log: ' + e;
+    } finally {
+      loading = false;
     }
-  }
+  };
 
-  async function handleInstall() {
+  const handleInstall = async () => {
     loading = true;
     message = await InstallService();
     await refreshStatus();
     loading = false;
-  }
+  };
 
-  async function handleInstallSystem() {
+  const handleInstallSystem = async () => {
     loading = true;
     message = await InstallSystemService();
     await refreshStatus();
     loading = false;
-  }
+  };
 
-  async function handleUninstall() {
+  const handleUninstall = async () => {
     loading = true;
     message = await UninstallService();
     await refreshStatus();
     loading = false;
-  }
+  };
 
-  async function handleStart() {
+  const handleStart = async () => {
     loading = true;
     message = await StartService();
     await refreshStatus();
     setTimeout(refreshLog, 1000);
     loading = false;
-  }
+  };
 
-  async function handleStop() {
+  const handleStop = async () => {
     loading = true;
     message = await StopService();
     await refreshStatus();
     loading = false;
-  }
+  };
 
   onMount(() => {
     refreshStatus();
@@ -75,7 +92,7 @@
 
 <main>
   <div class="container">
-    <h1>🔄 Service Manager</h1>
+    <h1>🧸 GO-TOY - A Toy Wails App</h1>
     
     <div class="status-box">
       <h2>Service Status</h2>
@@ -85,11 +102,11 @@
     </div>
 
     <div class="controls">
-      <button on:click={handleInstall} disabled={loading}>Install (user)</button>
-      <button on:click={handleInstallSystem} disabled={loading}>Install (system)</button>
-      <button on:click={handleStart} disabled={loading}>Start Service</button>
-      <button on:click={handleStop} disabled={loading}>Stop Service</button>
-      <button on:click={handleUninstall} disabled={loading}>Uninstall Service</button>
+      <button class="span-2" on:click={handleInstall} disabled={loading}>Install (user)</button>
+      <button class="span-2" on:click={handleInstallSystem} disabled={loading}>Install (system)</button>
+      <button class="span-2" on:click={handleUninstall} disabled={loading}>Uninstall Service</button>
+      <button class="span-3" on:click={handleStart} disabled={loading}>Start Service</button>
+      <button class="span-3" on:click={handleStop} disabled={loading}>Stop Service</button>
     </div>
 
     {#if message}
@@ -100,10 +117,13 @@
 
     <div class="log-box">
       <h2>Service Log</h2>
-      <div class="log">
-        {log || 'No log data available'}
+      <div class="log" bind:this={logElement}>
+        {displayLog || 'No log data available'}
       </div>
-      <button on:click={refreshLog} disabled={loading}>Refresh Log</button>
+      <div class="log-controls">
+        <button on:click={scrollLogToTop} disabled={loading}>Scroll to top</button>
+        <button on:click={scrollLogToBottom} disabled={loading}>Scroll to bottom</button>
+      </div>
     </div>
   </div>
 </main>
@@ -111,10 +131,15 @@
 <style>
   main {
     height: 100vh;
+    height: 100dvh;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 24px;
+    box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   }
 
@@ -125,6 +150,7 @@
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     max-width: 700px;
     width: 90%;
+    box-sizing: border-box;
   }
 
   h1 {
@@ -171,9 +197,21 @@
 
   .controls {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(6, 1fr);
     gap: 15px;
     margin-bottom: 25px;
+  }
+
+  .controls button {
+    width: 100%;
+  }
+
+  .controls .span-2 {
+    grid-column: span 2;
+  }
+
+  .controls .span-3 {
+    grid-column: span 3;
   }
 
   button {
@@ -225,6 +263,12 @@
     margin-bottom: 15px;
     white-space: pre-wrap;
     word-wrap: break-word;
+  }
+
+  .log-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
   }
 
   .log-box button {
