@@ -18,8 +18,8 @@ func NewService() Service {
 		return &linuxService{}
 	case "darwin":
 		return &darwinService{}
-	// case "windows":
-	// 	return &windowsService{}
+	case "windows":
+		return &windowsService{}
 	default:
 		return &unsupportedService{}
 	}

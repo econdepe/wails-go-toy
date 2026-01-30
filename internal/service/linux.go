@@ -11,8 +11,6 @@ import (
 
 type linuxService struct{}
 
-const serviceName = "gotoy-taskrunner"
-
 type serviceScope int
 
 const (
