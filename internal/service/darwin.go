@@ -107,7 +107,108 @@ func (d *darwinService) Install() error {
 	return nil
 }
 
+// InstallSystem installs a system-wide LaunchDaemon under /Library/LaunchDaemons.
+// This requires admin privileges.
+func (d *darwinService) InstallSystem() error {
+	srcExecPath, err := currentExecutablePath()
+	if err != nil {
+		return err
+	}
+
+	// Get current user info for running the service as that user
+	currentUser := os.Getenv("SUDO_USER")
+	if currentUser == "" {
+		currentUser = os.Getenv("USER")
+	}
+	if currentUser == "" {
+		return fmt.Errorf("failed to determine current user")
+	}
+
+	plistPath := getDarwinSystemLaunchDaemonPath()
+	binPath := getDarwinSystemBinaryPath()
+
+	// Create log directory
+	logDir := getDarwinSystemLogDir()
+	if err := runPrivilegedDarwin("mkdir", "-p", logDir); err != nil {
+		return fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	// Copy binary to system location
+	if err := copyExecutablePrivileged(srcExecPath, binPath); err != nil {
+		return fmt.Errorf("failed to copy executable: %w", err)
+	}
+
+	// Create plist content - run as the current user
+	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>%s</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>%s</string>
+		<string>run</string>
+	</array>
+
+	<key>UserName</key>
+	<string>%s</string>
+
+	<key>StandardOutPath</key>
+	<string>%s</string>
+	<key>StandardErrorPath</key>
+	<string>%s</string>
+</dict>
+</plist>
+`, serviceName, xmlEscape(binPath), currentUser, getDarwinSystemStdoutPath(), getDarwinSystemStderrPath())
+
+	// Write plist via sudo
+	if err := writeFilePrivileged(plistPath, plistContent, "644"); err != nil {
+		return fmt.Errorf("failed to write plist: %w", err)
+	}
+
+	// Unload if previously loaded (ignore errors)
+	_ = runLaunchctlSystem("bootout", "system", plistPath)
+
+	// Load the daemon
+	if err := runLaunchctlSystem("bootstrap", "system", plistPath); err != nil {
+		// Try legacy load as fallback
+		if err2 := runLaunchctlSystem("load", "-w", plistPath); err2 != nil {
+			return fmt.Errorf("launchctl bootstrap failed: %w (legacy load also failed: %v)", err, err2)
+		}
+	}
+
+	// Enable the service
+	_ = runLaunchctlSystem("enable", getDarwinSystemServiceTarget())
+
+	return nil
+}
+
 func (d *darwinService) Uninstall() error {
+	var errs []error
+
+	// Uninstall user service if exists
+	if d.userPlistExists() {
+		if err := d.uninstallUser(); err != nil {
+			errs = append(errs, fmt.Errorf("user service uninstall: %w", err))
+		}
+	}
+
+	// Uninstall system service if exists
+	if d.systemPlistExists() {
+		if err := d.uninstallSystem(); err != nil {
+			errs = append(errs, fmt.Errorf("system service uninstall: %w", err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%v", errs)
+	}
+	return nil
+}
+
+func (d *darwinService) uninstallUser() error {
 	plistPath, err := getDarwinUserLaunchAgentPath()
 	if err != nil {
 		return err
@@ -129,16 +230,73 @@ func (d *darwinService) Uninstall() error {
 	return nil
 }
 
+func (d *darwinService) uninstallSystem() error {
+	plistPath := getDarwinSystemLaunchDaemonPath()
+
+	// Stop and unload
+	_ = runLaunchctlSystem("bootout", "system", plistPath)
+	_ = runLaunchctlSystem("unload", "-w", plistPath)
+
+	// Remove plist
+	if err := runPrivilegedDarwin("rm", "-f", plistPath); err != nil {
+		return fmt.Errorf("failed to remove plist: %w", err)
+	}
+
+	// Remove binary
+	if err := runPrivilegedDarwin("rm", "-f", getDarwinSystemBinaryPath()); err != nil {
+		return fmt.Errorf("failed to remove binary: %w", err)
+	}
+
+	return nil
+}
+
+func (d *darwinService) userPlistExists() bool {
+	p, err := getDarwinUserLaunchAgentPath()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(p)
+	return err == nil
+}
+
+func (d *darwinService) systemPlistExists() bool {
+	_, err := os.Stat(getDarwinSystemLaunchDaemonPath())
+	return err == nil
+}
+
+type darwinScope int
+
+const (
+	darwinScopeNone darwinScope = iota
+	darwinScopeUser
+	darwinScopeSystem
+)
+
+func (d *darwinService) preferredScope() darwinScope {
+	if d.userPlistExists() {
+		return darwinScopeUser
+	}
+	if d.systemPlistExists() {
+		return darwinScopeSystem
+	}
+	return darwinScopeNone
+}
+
 func (d *darwinService) Start() error {
+	switch d.preferredScope() {
+	case darwinScopeUser:
+		return d.startUser()
+	case darwinScopeSystem:
+		return d.startSystem()
+	default:
+		return fmt.Errorf("service not installed")
+	}
+}
+
+func (d *darwinService) startUser() error {
 	plistPath, err := getDarwinUserLaunchAgentPath()
 	if err != nil {
 		return err
-	}
-	if _, err := os.Stat(plistPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("service not installed")
-		}
-		return fmt.Errorf("failed to stat plist: %w", err)
 	}
 
 	// Ensure registered with launchd, then enable and kickstart.
@@ -160,29 +318,61 @@ func (d *darwinService) Start() error {
 	return nil
 }
 
-func (d *darwinService) Stop() error {
-	// Disable first to avoid immediate relaunch in common configs.
-	_ = d.disableIgnoreErrors()
+func (d *darwinService) startSystem() error {
+	plistPath := getDarwinSystemLaunchDaemonPath()
 
-	// Stop job (best-effort if not running).
-	if err := d.stopIgnoreErrors(); err != nil {
-		return err
+	// Enable and start the system service
+	_ = runLaunchctlSystem("enable", getDarwinSystemServiceTarget())
+	if err := runLaunchctlSystem("kickstart", "-k", getDarwinSystemServiceTarget()); err != nil {
+		// Try legacy start as fallback
+		if err2 := runLaunchctlSystem("start", serviceName); err2 != nil {
+			// Try loading the plist
+			if err3 := runLaunchctlSystem("load", "-w", plistPath); err3 != nil {
+				return fmt.Errorf("failed to start system service: %w", err)
+			}
+		}
 	}
 	return nil
 }
 
-func (d *darwinService) Status() (string, error) {
-	plistPath, err := getDarwinUserLaunchAgentPath()
-	if err != nil {
-		return "", err
+func (d *darwinService) Stop() error {
+	switch d.preferredScope() {
+	case darwinScopeUser:
+		return d.stopUser()
+	case darwinScopeSystem:
+		return d.stopSystem()
+	default:
+		return fmt.Errorf("service not installed")
 	}
-	if _, err := os.Stat(plistPath); err != nil {
-		if os.IsNotExist(err) {
-			return "Not installed", nil
-		}
-		return "", fmt.Errorf("failed to stat plist: %w", err)
-	}
+}
 
+func (d *darwinService) stopUser() error {
+	// Disable first to avoid immediate relaunch in common configs.
+	_ = d.disableIgnoreErrors()
+
+	// Stop job (best-effort if not running).
+	_ = d.stopIgnoreErrors()
+	return nil
+}
+
+func (d *darwinService) stopSystem() error {
+	_ = runLaunchctlSystem("disable", getDarwinSystemServiceTarget())
+	_ = runLaunchctlSystem("stop", serviceName)
+	return nil
+}
+
+func (d *darwinService) Status() (string, error) {
+	switch d.preferredScope() {
+	case darwinScopeUser:
+		return d.statusUser()
+	case darwinScopeSystem:
+		return d.statusSystem()
+	default:
+		return "Not installed", nil
+	}
+}
+
+func (d *darwinService) statusUser() (string, error) {
 	loaded, out, err := d.isLoaded()
 	if err != nil {
 		return "", err
@@ -196,6 +386,26 @@ func (d *darwinService) Status() (string, error) {
 		return "Running (user)", nil
 	}
 	return "Stopped (user)", nil
+}
+
+func (d *darwinService) statusSystem() (string, error) {
+	cmd := exec.Command("launchctl", "print", getDarwinSystemServiceTarget())
+	out, err := cmd.CombinedOutput()
+	outStr := string(out)
+
+	if err != nil {
+		lower := strings.ToLower(outStr)
+		if strings.Contains(lower, "could not find service") ||
+			strings.Contains(lower, "not found") {
+			return "Installed (not loaded)", nil
+		}
+		return "", fmt.Errorf("failed to get system service status: %w: %s", err, strings.TrimSpace(outStr))
+	}
+
+	if strings.Contains(outStr, "state = running") || strings.Contains(outStr, "pid =") {
+		return "Running (system)", nil
+	}
+	return "Stopped (system)", nil
 }
 
 func (d *darwinService) isLoaded() (bool, string, error) {
@@ -273,6 +483,87 @@ func launchctlCombinedOutput(args ...string) (string, error) {
 	cmd := exec.Command("launchctl", args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+func runPrivilegedDarwin(name string, args ...string) error {
+	if os.Geteuid() == 0 {
+		cmd := exec.Command(name, args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%s failed: %w: %s", name, err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+	sudoArgs := append([]string{name}, args...)
+	cmd := exec.Command("sudo", sudoArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sudo %s failed: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func runLaunchctlSystem(args ...string) error {
+	if os.Geteuid() == 0 {
+		cmd := exec.Command("launchctl", args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("launchctl %s failed: %w: %s", args[0], err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+	sudoArgs := append([]string{"launchctl"}, args...)
+	cmd := exec.Command("sudo", sudoArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sudo launchctl %s failed: %w: %s", args[0], err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func copyExecutablePrivileged(src, dst string) error {
+	// Use cp via sudo to copy to privileged location
+	if os.Geteuid() == 0 {
+		if err := copyExecutable(src, dst); err != nil {
+			return err
+		}
+		return nil
+	}
+	// Remove existing first
+	_ = exec.Command("sudo", "rm", "-f", dst).Run()
+	cmd := exec.Command("sudo", "cp", src, dst)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to copy: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	// Make executable
+	cmd = exec.Command("sudo", "chmod", "755", dst)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to chmod: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func writeFilePrivileged(path, content, mode string) error {
+	if os.Geteuid() == 0 {
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return err
+		}
+		return nil
+	}
+	// Use tee via sudo
+	cmd := exec.Command("sudo", "tee", path)
+	cmd.Stdin = strings.NewReader(content)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to write: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	// Set permissions
+	cmd = exec.Command("sudo", "chmod", mode, path)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to chmod: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func xmlEscape(s string) string {

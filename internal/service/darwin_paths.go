@@ -47,3 +47,29 @@ func getDarwinInstalledBinaryPath() (string, error) {
 	// Install to ~/.local/bin/go-toy - a common user-local bin directory
 	return filepath.Join(home, ".local", "bin", "go-toy"), nil
 }
+
+// System-wide (LaunchDaemon) paths
+
+func getDarwinSystemLaunchDaemonPath() string {
+	return fmt.Sprintf("/Library/LaunchDaemons/%s.plist", serviceName)
+}
+
+func getDarwinSystemBinaryPath() string {
+	return "/usr/local/bin/go-toy-taskrunner"
+}
+
+func getDarwinSystemServiceTarget() string {
+	return fmt.Sprintf("system/%s", serviceName)
+}
+
+func getDarwinSystemLogDir() string {
+	return "/var/log/go-toy"
+}
+
+func getDarwinSystemStdoutPath() string {
+	return filepath.Join(getDarwinSystemLogDir(), "launchd.out.log")
+}
+
+func getDarwinSystemStderrPath() string {
+	return filepath.Join(getDarwinSystemLogDir(), "launchd.err.log")
+}
