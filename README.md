@@ -53,4 +53,4 @@ The app can install the background task as a **systemd user service** (no sudo, 
 
 ## Building
 
-To build a redistributable, production mode package, use `wails build`.
+To build a redistributable, production mode package, use `wails build` (again with the `-tags webkit2_41` if you don't have webkit2gtk-4.0).
