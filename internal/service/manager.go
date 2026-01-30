@@ -16,8 +16,8 @@ func NewService() Service {
 	switch runtime.GOOS {
 	case "linux":
 		return &linuxService{}
-	// case "darwin":
-	// 	return &darwinService{}
+	case "darwin":
+		return &darwinService{}
 	// case "windows":
 	// 	return &windowsService{}
 	default:
